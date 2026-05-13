@@ -51,6 +51,8 @@ import {
   RefreshCw,
   RotateCw,
   Flag,
+  Globe,
+  Cloud,
   AlignLeft,
   AlignCenter,
   AlignRight,
@@ -1970,7 +1972,7 @@ export default function App() {
     setProjectsList(projects);
   }, []);
 
-  const saveCurrentProject = useCallback(async () => {
+  const saveCurrentProject = useCallback(async (status: 'Draft' | 'Published' = 'Draft') => {
     setIsSaving(true);
     try {
       const projects = loadProjectsFromStorage();
@@ -1981,7 +1983,7 @@ export default function App() {
         id: currentProjectId || `project_${Date.now()}`,
         title: projectName,
         description: projectDescription,
-        status: 'Draft',
+        status: status,
         createdAt: existingProjectIndex >= 0 ? projects[existingProjectIndex].createdAt : now,
         updatedAt: now,
         scenes: state.scenes,
@@ -2000,7 +2002,10 @@ export default function App() {
 
       saveProjects(updatedProjects);
       setHasUnsavedChanges(false);
-      setState(prev => ({ ...prev, appView: 'dashboard' }));
+      
+      if (status === 'Draft') {
+        setState(prev => ({ ...prev, appView: 'dashboard' }));
+      }
     } catch (error) {
       console.error("Error saving project", error);
     } finally {
@@ -2140,7 +2145,16 @@ export default function App() {
   };
 
   const handleSaveProject = async () => {
-    await saveCurrentProject();
+    await saveCurrentProject('Draft');
+  };
+
+  const handlePublishProject = async () => {
+    if (!projectName.trim()) {
+      alert('Please enter a project title before publishing.');
+      return;
+    }
+    await saveCurrentProject('Published');
+    alert('Project published successfully!');
   };
 
   const handleDeleteProject = (id: string) => {
@@ -3095,10 +3109,18 @@ export default function App() {
             <button 
               onClick={handleSaveProject}
               disabled={isSaving}
+              className={`flex items-center gap-2 px-4 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-bold shadow-sm transition-all transform active:scale-95 ${isSaving ? 'opacity-50' : ''}`}
+            >
+              <Save size={16} className={isSaving && !currentProjectId?.includes('pub') ? 'animate-spin' : ''} />
+              {isSaving && !currentProjectId?.includes('pub') ? 'Saving...' : 'Save Draft'}
+            </button>
+            <button 
+              onClick={handlePublishProject}
+              disabled={isSaving}
               className={`flex items-center gap-2 px-4 py-1.5 bg-brand-primary hover:bg-opacity-90 text-white rounded-lg text-sm font-bold shadow-md transition-all transform active:scale-95 ${isSaving ? 'opacity-50' : ''}`}
             >
-              <Save size={16} className={isSaving ? 'animate-spin' : ''} />
-              {isSaving ? 'Saving...' : 'Save Project'}
+              <Globe size={16} className={isSaving && currentProjectId?.includes('pub') ? 'animate-spin' : ''} />
+              {isSaving && currentProjectId?.includes('pub') ? 'Publishing...' : 'Publish'}
             </button>
           </div>
         </nav>
