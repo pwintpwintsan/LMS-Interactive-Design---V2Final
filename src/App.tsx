@@ -2082,13 +2082,62 @@ export default function App() {
     saveProjects([newProject, ...projects]);
   }, [saveProjects]);
 
+  const handleSyncToRepo = async () => {
+    setIsSaving(true);
+    try {
+      const resp = await fetch('/api/sync-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projects: projectsList, scores })
+      });
+      const data = await resp.json();
+      if (data.success) {
+        alert('Module data synced to project files! Go to Settings -> Export to GitHub to push your changes.');
+      }
+    } catch (error) {
+      console.error('Sync failed:', error);
+      alert('Sync failed. Please check your connection.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   // Load initial data
   useEffect(() => {
-    loadProjects();
-    const savedId = loadCurrentProjectId();
-    if (savedId) {
-      handleLoadProject(savedId);
-    }
+    const initData = async () => {
+      // 1. Load from storage
+      const projects = loadProjectsFromStorage();
+      const savedScores = loadScoresFromStorage();
+      
+      // 2. Check if we should seed from backend (only if storage is empty)
+      if (projects.length === 0) {
+        try {
+          const resp = await fetch('/api/seed-data');
+          const seed = await resp.json();
+          if (seed.projects && seed.projects.length > 0) {
+            saveProjectsToStorage(seed.projects);
+            setProjectsList(seed.projects);
+            if (seed.scores) setScores(seed.scores);
+          } else {
+            setProjectsList(projects);
+            setScores(savedScores);
+          }
+        } catch (e) {
+          setProjectsList(projects);
+          setScores(savedScores);
+        }
+      } else {
+        setProjectsList(projects);
+        setScores(savedScores);
+      }
+      
+      const savedId = loadCurrentProjectId();
+      if (savedId) {
+        handleLoadProject(savedId);
+      }
+    };
+
+    initData();
   }, []);
 
   // Auto Save Logic
@@ -2861,8 +2910,18 @@ export default function App() {
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-xs font-black text-gray-400 font-mono tracking-widest uppercase">My Learning Inventory</h3>
-                  <div className="px-3 py-1 bg-gray-100 rounded-full text-[9px] font-black text-gray-500 uppercase tracking-widest">
-                    {projectsList.length} Modules Total
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={handleSyncToRepo}
+                      disabled={isSaving}
+                      className="px-3 py-1 bg-black text-white hover:bg-gray-800 rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50"
+                    >
+                      <Cloud size={10} className={isSaving ? 'animate-spin' : ''} />
+                      Sync to Repository (GitHub)
+                    </button>
+                    <div className="px-3 py-1 bg-gray-100 rounded-full text-[9px] font-black text-gray-500 uppercase tracking-widest">
+                      {projectsList.length} Modules Total
+                    </div>
                   </div>
                 </div>
                 {projectsList.map(p => (
