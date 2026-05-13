@@ -2003,6 +2003,9 @@ export default function App() {
       saveProjects(updatedProjects);
       setHasUnsavedChanges(false);
       
+      // Update projects list immediately
+      setProjectsList(updatedProjects);
+      
       if (status === 'Draft') {
         setState(prev => ({ ...prev, appView: 'dashboard' }));
       }
@@ -2082,62 +2085,13 @@ export default function App() {
     saveProjects([newProject, ...projects]);
   }, [saveProjects]);
 
-  const handleSyncToRepo = async () => {
-    setIsSaving(true);
-    try {
-      const resp = await fetch('/api/sync-data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projects: projectsList, scores })
-      });
-      const data = await resp.json();
-      if (data.success) {
-        alert('Module data synced to project files! Go to Settings -> Export to GitHub to push your changes.');
-      }
-    } catch (error) {
-      console.error('Sync failed:', error);
-      alert('Sync failed. Please check your connection.');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
   // Load initial data
   useEffect(() => {
-    const initData = async () => {
-      // 1. Load from storage
-      const projects = loadProjectsFromStorage();
-      const savedScores = loadScoresFromStorage();
-      
-      // 2. Check if we should seed from backend (only if storage is empty)
-      if (projects.length === 0) {
-        try {
-          const resp = await fetch('/api/seed-data');
-          const seed = await resp.json();
-          if (seed.projects && seed.projects.length > 0) {
-            saveProjectsToStorage(seed.projects);
-            setProjectsList(seed.projects);
-            if (seed.scores) setScores(seed.scores);
-          } else {
-            setProjectsList(projects);
-            setScores(savedScores);
-          }
-        } catch (e) {
-          setProjectsList(projects);
-          setScores(savedScores);
-        }
-      } else {
-        setProjectsList(projects);
-        setScores(savedScores);
-      }
-      
-      const savedId = loadCurrentProjectId();
-      if (savedId) {
-        handleLoadProject(savedId);
-      }
-    };
-
-    initData();
+    loadProjects();
+    const savedId = loadCurrentProjectId();
+    if (savedId) {
+      handleLoadProject(savedId);
+    }
   }, []);
 
   // Auto Save Logic
@@ -2910,18 +2864,8 @@ export default function App() {
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-xs font-black text-gray-400 font-mono tracking-widest uppercase">My Learning Inventory</h3>
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={handleSyncToRepo}
-                      disabled={isSaving}
-                      className="px-3 py-1 bg-black text-white hover:bg-gray-800 rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50"
-                    >
-                      <Cloud size={10} className={isSaving ? 'animate-spin' : ''} />
-                      Sync to Repository (GitHub)
-                    </button>
-                    <div className="px-3 py-1 bg-gray-100 rounded-full text-[9px] font-black text-gray-500 uppercase tracking-widest">
-                      {projectsList.length} Modules Total
-                    </div>
+                  <div className="px-3 py-1 bg-gray-100 rounded-full text-[9px] font-black text-gray-500 uppercase tracking-widest">
+                    {projectsList.length} Modules Total
                   </div>
                 </div>
                 {projectsList.map(p => (
@@ -2962,8 +2906,10 @@ export default function App() {
                       <h4 className="text-sm font-bold text-gray-900 group-hover:text-orange-600 transition-colors tracking-tight line-clamp-1">{p.title}</h4>
                       <div className="flex items-center gap-2 mt-1">
                         <div className="flex items-center gap-1">
-                          <Play size={10} className="text-orange-400" />
-                          <span className="text-gray-400 font-bold text-[8px] uppercase tracking-widest">{p.status}</span>
+                          <Play size={10} className={p.status === 'Published' ? 'text-green-500' : 'text-orange-400'} />
+                          <span className={`font-black text-[8px] uppercase tracking-widest ${p.status === 'Published' ? 'text-green-600' : 'text-gray-400'}`}>
+                            {p.status}
+                          </span>
                         </div>
                         <div className="w-1 h-1 bg-gray-200 rounded-full" />
                         <div className="flex items-center gap-1">
@@ -3314,7 +3260,12 @@ export default function App() {
                   <div className="p-3 bg-brand-primary/5 rounded-xl border border-brand-primary/10 border-dashed">
                     <div className="flex items-center justify-between mb-2">
                       <h4 className="text-[10px] font-black text-brand-primary uppercase tracking-widest">Active Project Info</h4>
-                      {hasUnsavedChanges && <span className="text-[9px] font-black text-orange-500 bg-orange-100 px-2 py-0.5 rounded-full uppercase tracking-tighter">Modified</span>}
+                      <div className="flex gap-1">
+                        {currentProjectId && projectsList.find(p => p.id === currentProjectId)?.status === 'Published' && (
+                          <span className="text-[9px] font-black text-green-600 bg-green-100 px-2 py-0.5 rounded-full uppercase tracking-tighter">Published</span>
+                        )}
+                        {hasUnsavedChanges && <span className="text-[9px] font-black text-orange-500 bg-orange-100 px-2 py-0.5 rounded-full uppercase tracking-tighter">Modified</span>}
+                      </div>
                     </div>
                     <div className="space-y-2">
                       <input 
