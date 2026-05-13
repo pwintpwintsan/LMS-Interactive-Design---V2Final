@@ -11,8 +11,22 @@ export interface Project {
   playSettings: PlaySettings;
 }
 
+export interface Score {
+  id: string;
+  projectId: string;
+  sceneId: string;
+  type?: string;
+  totalPairs?: number;
+  correctPairs?: number;
+  isCorrect?: boolean;
+  score?: number;
+  max?: number;
+  playedAt: string;
+}
+
 const PROJECTS_KEY = 'editor_projects';
 const CURRENT_PROJECT_ID_KEY = 'current_project_id';
+const SCORES_KEY = 'editor_scores';
 
 export const loadProjects = (): Project[] => {
   try {
@@ -31,6 +45,27 @@ export const saveProjects = (projects: Project[]) => {
     localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
   } catch (error) {
     console.error('Error saving projects to localStorage', error);
+  }
+};
+
+export const loadScores = (): Score[] => {
+  try {
+    const data = localStorage.getItem(SCORES_KEY);
+    if (!data) return [];
+    return JSON.parse(data);
+  } catch (error) {
+    console.error('Error loading scores from localStorage', error);
+    return [];
+  }
+};
+
+export const saveScore = (score: Score) => {
+  try {
+    const scores = loadScores();
+    scores.push(score);
+    localStorage.setItem(SCORES_KEY, JSON.stringify(scores));
+  } catch (error) {
+    console.error('Error saving score to localStorage', error);
   }
 };
 

@@ -69,10 +69,13 @@ import {
 } from './types';
 import { 
   Project, 
+  Score,
   loadProjects as loadProjectsFromStorage, 
   saveProjects as saveProjectsToStorage,
   saveCurrentProjectId,
   loadCurrentProjectId,
+  saveScore,
+  loadScores as loadScoresFromStorage
 } from './lib/storage';
 
 // Firebase logic removed - using localStorage persistence
@@ -312,7 +315,15 @@ const MatchingPairRenderer = ({
       }
       
       if (isPlaying) {
-        // Results recording skipped in localStorage mode
+        saveScore({
+          id: `score_${Date.now()}`,
+          projectId: projectId || 'anonymous',
+          sceneId: element.id,
+          type: isTriple ? 'triple-match' : 'pair-match',
+          totalPairs: totalPairs,
+          correctPairs: correct,
+          playedAt: new Date().toISOString()
+        });
         onComplete?.(correct, totalPairs);
       }
     }
@@ -1575,6 +1586,14 @@ const MultipleChoiceRenderer = ({
     setIsAnswered(true);
 
     if (isPlaying) {
+      saveScore({
+        id: `score_${Date.now()}`,
+        projectId: projectId || 'anonymous',
+        sceneId: element.id,
+        type: 'multiple-choice',
+        isCorrect: isCorrect,
+        playedAt: new Date().toISOString()
+      });
       onComplete?.(isCorrect ? 1 : 0, 1);
     }
   };
@@ -1929,6 +1948,7 @@ export default function App() {
   const [projectName, setProjectName] = useState('My AI Course');
   const [projectDescription, setProjectDescription] = useState('Interactive learning module');
   const [projectsList, setProjectsList] = useState<Project[]>([]);
+  const [scores, setScores] = useState<Score[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -1940,6 +1960,8 @@ export default function App() {
     setIsLoadingProjects(true);
     const projects = loadProjectsFromStorage();
     setProjectsList(projects);
+    const savedScores = loadScoresFromStorage();
+    setScores(savedScores);
     setIsLoadingProjects(false);
   }, []);
 
@@ -2820,93 +2842,150 @@ export default function App() {
               <p className="text-gray-400 font-bold mb-6 text-[9px] uppercase tracking-widest">Create your first lesson to see it here</p>
             </div>
           ) : (
-            <div className="flex flex-col gap-3 max-w-4xl">
-              {projectsList.map(p => (
-                <div 
-                  key={p.id} 
-                  className="group bg-white rounded-2xl p-3 border border-gray-100 hover:border-orange-200 shadow-sm hover:shadow-lg hover:shadow-orange-500/5 transition-all cursor-pointer flex items-center gap-4 relative"
-                  onClick={() => handleOpenProject(p.id)}
-                >
-                  {/* Left: Thumbnail Icon */}
-                  <div className="w-16 h-16 bg-orange-50 rounded-xl flex items-center justify-center text-orange-200 group-hover:bg-orange-100 transition-colors shrink-0 overflow-hidden relative">
-                    <Box size={24} className="group-hover:scale-110 transition-transform duration-500" />
-                    <div className="absolute inset-0 flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 backdrop-blur-sm bg-white/40 transition-all">
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenProject(p.id, true);
-                        }}
-                        className="p-1.5 bg-green-500 text-white rounded-lg shadow-md hover:scale-110 active:scale-95 transition-all"
-                        title="Play"
-                      >
-                        <Play size={14} fill="currentColor" />
-                      </button>
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenProject(p.id, false);
-                        }}
-                        className="p-1.5 bg-orange-500 text-white rounded-lg shadow-md hover:scale-110 active:scale-95 transition-all"
-                        title="Edit"
-                      >
-                        <Edit3 size={14} />
-                      </button>
-                    </div>
-                  </div>
-                  
-                  {/* Center: Info */}
-                  <div className="flex-1 min-w-0">
-                    <h4 className="text-sm font-bold text-gray-900 group-hover:text-orange-600 transition-colors tracking-tight line-clamp-1">{p.title}</h4>
-                    <div className="flex items-center gap-2 mt-1">
-                      <div className="flex items-center gap-1">
-                        <Play size={10} className="text-orange-400" />
-                        <span className="text-gray-400 font-bold text-[8px] uppercase tracking-widest">{p.status}</span>
-                      </div>
-                      <div className="w-1 h-1 bg-gray-200 rounded-full" />
-                      <div className="flex items-center gap-1">
-                        <span className="text-gray-400 font-bold text-[8px] uppercase tracking-widest">{new Date(p.updatedAt).toLocaleDateString()}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right: Actions */}
-                  <div className="flex items-center gap-2 pr-2">
-                    <div className="hidden group-hover:flex items-center gap-1">
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          duplicateProject(p.id);
-                        }}
-                        className="p-2 text-gray-400 hover:text-blue-500 transition-colors"
-                        title="Duplicate"
-                      >
-                        <Copy size={14} />
-                      </button>
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenProject(p.id, false);
-                        }}
-                        className="p-2 text-gray-400 hover:text-orange-500 transition-colors"
-                        title="Quick Edit"
-                      >
-                        <Edit3 size={14} />
-                      </button>
-                    </div>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteProject(p.id);
-                      }}
-                      className="p-2 text-gray-200 hover:text-red-500 transition-colors"
-                      title="Delete"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                    <ChevronRight size={18} className="text-gray-200 group-hover:text-orange-300 group-hover:translate-x-1 transition-all" />
+            <div className="flex flex-col gap-12 max-w-4xl">
+              {/* Modules List */}
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xs font-black text-gray-400 font-mono tracking-widest uppercase">My Learning Inventory</h3>
+                  <div className="px-3 py-1 bg-gray-100 rounded-full text-[9px] font-black text-gray-500 uppercase tracking-widest">
+                    {projectsList.length} Modules Total
                   </div>
                 </div>
-              ))}
+                {projectsList.map(p => (
+                  <div 
+                    key={p.id} 
+                    className="group bg-white rounded-2xl p-3 border border-gray-100 hover:border-orange-200 shadow-sm hover:shadow-lg hover:shadow-orange-500/5 transition-all cursor-pointer flex items-center gap-4 relative"
+                    onClick={() => handleOpenProject(p.id)}
+                  >
+                    {/* Left: Thumbnail Icon */}
+                    <div className="w-16 h-16 bg-orange-50 rounded-xl flex items-center justify-center text-orange-200 group-hover:bg-orange-100 transition-colors shrink-0 overflow-hidden relative">
+                      <Box size={24} className="group-hover:scale-110 transition-transform duration-500" />
+                      <div className="absolute inset-0 flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 backdrop-blur-sm bg-white/40 transition-all">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenProject(p.id, true);
+                          }}
+                          className="p-1.5 bg-green-500 text-white rounded-lg shadow-md hover:scale-110 active:scale-95 transition-all"
+                          title="Play"
+                        >
+                          <Play size={14} fill="currentColor" />
+                        </button>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenProject(p.id, false);
+                          }}
+                          className="p-1.5 bg-orange-500 text-white rounded-lg shadow-md hover:scale-110 active:scale-95 transition-all"
+                          title="Edit"
+                        >
+                          <Edit3 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    
+                    {/* Center: Info */}
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-bold text-gray-900 group-hover:text-orange-600 transition-colors tracking-tight line-clamp-1">{p.title}</h4>
+                      <div className="flex items-center gap-2 mt-1">
+                        <div className="flex items-center gap-1">
+                          <Play size={10} className="text-orange-400" />
+                          <span className="text-gray-400 font-bold text-[8px] uppercase tracking-widest">{p.status}</span>
+                        </div>
+                        <div className="w-1 h-1 bg-gray-200 rounded-full" />
+                        <div className="flex items-center gap-1">
+                          <span className="text-gray-400 font-bold text-[8px] uppercase tracking-widest">{new Date(p.updatedAt).toLocaleDateString()}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right: Actions */}
+                    <div className="flex items-center gap-2 pr-2">
+                      <div className="hidden group-hover:flex items-center gap-1">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            duplicateProject(p.id);
+                          }}
+                          className="p-2 text-gray-400 hover:text-blue-500 transition-colors"
+                          title="Duplicate"
+                        >
+                          <Copy size={14} />
+                        </button>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenProject(p.id, false);
+                          }}
+                          className="p-2 text-gray-400 hover:text-orange-500 transition-colors"
+                          title="Quick Edit"
+                        >
+                          <Edit3 size={14} />
+                        </button>
+                      </div>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteProject(p.id);
+                        }}
+                        className="p-2 text-gray-200 hover:text-red-500 transition-colors"
+                        title="Delete"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                      <ChevronRight size={18} className="text-gray-200 group-hover:text-orange-300 group-hover:translate-x-1 transition-all" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Recent Test Activities */}
+              {scores.length > 0 && (
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xs font-black text-gray-400 font-mono tracking-widest uppercase">Learner Performance Logs</h3>
+                    <div className="px-3 py-1 bg-green-50 rounded-full text-[9px] font-black text-green-600 uppercase tracking-widest">
+                      {scores.length} Records Verified
+                    </div>
+                  </div>
+                  <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+                    <div className="divide-y divide-gray-50">
+                      {scores.slice().reverse().slice(0, 5).map(score => {
+                        const project = projectsList.find(p => p.id === score.projectId);
+                        return (
+                          <div key={score.id} className="p-4 hover:bg-gray-50 transition-colors flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${score.isCorrect !== false ? 'bg-green-50 text-green-500' : 'bg-red-50 text-red-500'}`}>
+                                {score.type === 'multiple-choice' ? <CheckSquare size={18} /> : <Layers size={18} />}
+                              </div>
+                              <div>
+                                <p className="text-[11px] font-black text-gray-900 tracking-tight uppercase">{project?.title || 'Archived Module'}</p>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">{score.type?.replace('-', ' ')}</span>
+                                  <div className="w-1 h-1 bg-gray-200 rounded-full" />
+                                  <span className="text-[8px] font-bold text-gray-300 uppercase tracking-widest">{new Date(score.playedAt).toLocaleDateString()}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              {score.isCorrect !== undefined ? (
+                                <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest ${score.isCorrect ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                  {score.isCorrect ? 'Correct' : 'Incorrect'}
+                                </span>
+                              ) : (
+                                <div className="flex flex-col items-end">
+                                  <span className="text-[14px] font-black text-orange-500 leading-none">{Math.round((score.correctPairs! / score.totalPairs!) * 100)}%</span>
+                                  <span className="text-[8px] font-bold text-gray-300 uppercase tracking-tighter mt-1">{score.correctPairs}/{score.totalPairs} Points</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </main>
