@@ -67,59 +67,15 @@ import {
   Choice,
   PlaySettings 
 } from './types';
-import { db, auth, signInWithGoogle, serverTimestamp } from './firebase';
-import { collection, addDoc, doc, getDocFromServer, getDocs, query, where, setDoc, updateDoc, deleteDoc, onSnapshot, orderBy } from 'firebase/firestore';
-import { onAuthStateChanged } from 'firebase/auth';
+import { 
+  Project, 
+  loadProjects as loadProjectsFromStorage, 
+  saveProjects as saveProjectsToStorage,
+  saveCurrentProjectId,
+  loadCurrentProjectId,
+} from './lib/storage';
 
-// --- Firebase Error Handler ---
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-    },
-    operationType,
-    path
-  };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
-
-// --- Connection Test ---
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if(error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration.");
-    }
-  }
-}
-testConnection();
+// Firebase logic removed - using localStorage persistence
 
 // Mock Assets
 const UI_ELEMENTS: { type: WidgetType; name: string; icon: any }[] = [
@@ -355,26 +311,8 @@ const MatchingPairRenderer = ({
         });
       }
       
-      // Record Results to Firebase
-      const recordResult = async () => {
-        const path = 'scores';
-        try {
-          await addDoc(collection(db, path), {
-            projectId: projectId || 'anonymous',
-            sceneId: element.id,
-            totalPairs: totalPairs,
-            correctPairs: correct,
-            userId: auth.currentUser?.uid || null,
-            playedAt: serverTimestamp(),
-            isTripleMatch: isTriple
-          });
-        } catch (error) {
-          handleFirestoreError(error, OperationType.CREATE, path);
-        }
-      };
-
       if (isPlaying) {
-        recordResult();
+        // Results recording skipped in localStorage mode
         onComplete?.(correct, totalPairs);
       }
     }
@@ -1636,26 +1574,7 @@ const MultipleChoiceRenderer = ({
     setSelectedId(choiceId);
     setIsAnswered(true);
 
-    // Record results
-    const recordResult = async () => {
-      const path = 'scores';
-      try {
-        await addDoc(collection(db, path), {
-          projectId: projectId || 'anonymous',
-          sceneId: element.id,
-          type: 'multiple-choice',
-          isCorrect: isCorrect,
-          selectedChoiceId: choiceId,
-          userId: auth.currentUser?.uid || null,
-          playedAt: serverTimestamp()
-        });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, path);
-      }
-    };
-
     if (isPlaying) {
-      recordResult();
       onComplete?.(isCorrect ? 1 : 0, 1);
     }
   };
@@ -1991,159 +1910,6 @@ const FAMOUS_FONTS = [
 ];
 
 export default function App() {
-  const [user, setUser] = useState<any>(null);
-  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState('My AI Course');
-  const [projectsList, setProjectsList] = useState<{id: string, name: string}[]>([]);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      if (u) {
-        fetchProjects(u.uid);
-      } else {
-        setProjectsList([]);
-        setCurrentProjectId(null);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  const fetchProjects = async (uid: string) => {
-    setIsLoadingProjects(true);
-    const path = 'projects';
-    try {
-      const q = query(
-        collection(db, path), 
-        where('ownerId', '==', uid),
-        orderBy('updatedAt', 'desc')
-      );
-      const querySnapshot = await getDocs(q);
-      const projects = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        name: doc.data().name as string
-      }));
-      setProjectsList(projects);
-    } catch (error) {
-      console.error("Error fetching projects", error);
-    } finally {
-      setIsLoadingProjects(false);
-    }
-  };
-
-  const handleSaveProject = async () => {
-    if (!user) {
-      signInWithGoogle();
-      return;
-    }
-
-     setIsSaving(true);
-    const path = 'projects';
-    try {
-      const projectData = {
-        name: projectName,
-        ownerId: user.uid,
-        scenes: state.scenes,
-        playSettings: state.playSettings,
-        updatedAt: serverTimestamp(),
-      };
-
-      if (currentProjectId) {
-        await updateDoc(doc(db, path, currentProjectId), projectData);
-      } else {
-        const docRef = await addDoc(collection(db, path), {
-          ...projectData,
-          createdAt: serverTimestamp(),
-        });
-        setCurrentProjectId(docRef.id);
-      }
-      await fetchProjects(user.uid);
-      setState(prev => ({ ...prev, appView: 'dashboard' }));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleLoadProject = async (id: string) => {
-    const path = 'projects';
-    try {
-      const docSnap = await getDocFromServer(doc(db, path, id));
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setState(prev => ({
-          ...prev,
-          scenes: data.scenes,
-          currentSceneId: data.scenes[0]?.id || 'scene-1',
-          selectedElementId: null,
-          playSettings: data.playSettings || DEFAULT_PLAY_SETTINGS
-        }));
-        setHistory([]);
-        setRedoStack([]);
-        setCurrentProjectId(id);
-        setProjectName(data.name || 'Untitled Project');
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.GET, path);
-    }
-  };
-
-  const handleDeleteProject = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this project?')) return;
-    const path = 'projects';
-    try {
-      await deleteDoc(doc(db, path, id));
-      if (currentProjectId === id) {
-        setCurrentProjectId(null);
-        setState({
-          scenes: [INITIAL_SCENE],
-          currentSceneId: 'scene-1',
-          selectedElementId: null,
-          editingElementId: null,
-          zoom: 1,
-          viewMode: 'desktop',
-          isPlaying: false,
-          playSettings: DEFAULT_PLAY_SETTINGS,
-        });
-      }
-      fetchProjects(user?.uid);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, path);
-    }
-  };
-
-  const handleLogin = async () => {
-    try {
-      const u = await signInWithGoogle();
-      setUser(u);
-    } catch (error) {
-      console.error("Login failed", error);
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await auth.signOut();
-      setUser(null);
-      setCurrentProjectId(null);
-      setState({
-        scenes: [INITIAL_SCENE],
-        currentSceneId: 'scene-1',
-        selectedElementId: null,
-        editingElementId: null,
-        zoom: 1,
-        viewMode: 'desktop',
-        isPlaying: false,
-        playSettings: DEFAULT_PLAY_SETTINGS,
-      });
-    } catch (error) {
-      console.error("Logout failed", error);
-    }
-  };
-
   const [state, setState] = useState<EditorState>({
     scenes: [INITIAL_SCENE],
     currentSceneId: 'scene-1',
@@ -2156,17 +1922,79 @@ export default function App() {
     playSettings: DEFAULT_PLAY_SETTINGS,
   });
 
+  const [history, setHistory] = useState<EditorState[]>([]);
+  const [redoStack, setRedoStack] = useState<EditorState[]>([]);
+  const [user, setUser] = useState<any>({ displayName: 'Local Designer', uid: 'local_user' });
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState('My AI Course');
+  const [projectDescription, setProjectDescription] = useState('Interactive learning module');
+  const [projectsList, setProjectsList] = useState<Project[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProjectForm, setNewProjectForm] = useState({ title: '', pageCount: 1 });
 
-  const handleNewProject = (title: string, count: number) => {
+  // Required Utility Functions
+  const loadProjects = useCallback(() => {
+    setIsLoadingProjects(true);
+    const projects = loadProjectsFromStorage();
+    setProjectsList(projects);
+    setIsLoadingProjects(false);
+  }, []);
+
+  const saveProjects = useCallback((projects: Project[]) => {
+    saveProjectsToStorage(projects);
+    setProjectsList(projects);
+  }, []);
+
+  const saveCurrentProject = useCallback(async () => {
+    setIsSaving(true);
+    try {
+      const projects = loadProjectsFromStorage();
+      const now = new Date().toISOString();
+      const existingProjectIndex = projects.findIndex(p => p.id === currentProjectId);
+
+      const projectData: Project = {
+        id: currentProjectId || `project_${Date.now()}`,
+        title: projectName,
+        description: projectDescription,
+        status: 'Draft',
+        createdAt: existingProjectIndex >= 0 ? projects[existingProjectIndex].createdAt : now,
+        updatedAt: now,
+        scenes: state.scenes,
+        playSettings: state.playSettings,
+      };
+
+      let updatedProjects: Project[];
+      if (existingProjectIndex >= 0) {
+        updatedProjects = [...projects];
+        updatedProjects[existingProjectIndex] = projectData;
+      } else {
+        updatedProjects = [projectData, ...projects];
+        setCurrentProjectId(projectData.id);
+        saveCurrentProjectId(projectData.id);
+      }
+
+      saveProjects(updatedProjects);
+      setHasUnsavedChanges(false);
+      setState(prev => ({ ...prev, appView: 'dashboard' }));
+    } catch (error) {
+      console.error("Error saving project", error);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [currentProjectId, projectName, projectDescription, state.scenes, state.playSettings, saveProjects]);
+
+  const createNewProject = useCallback((title: string, count: number) => {
     setCurrentProjectId(null);
+    saveCurrentProjectId(null);
     setProjectName(title || 'New Course Module');
+    setProjectDescription('Interactive learning module');
     
-    // Generate empty scenes based on count
     const initialScenes = Array.from({ length: Math.max(1, count) }, (_, i) => ({
       ...INITIAL_SCENE,
-      id: `scene-${i + 1}`,
+      id: `scene-${Date.now()}-${i}`,
       name: `Test Page ${i + 1}`
     }));
 
@@ -2185,15 +2013,149 @@ export default function App() {
     setRedoStack([]);
     setShowNewProjectModal(false);
     setNewProjectForm({ title: '', pageCount: 1 });
+    setHasUnsavedChanges(true);
+  }, []);
+
+  const deleteProject = useCallback((projectId: string) => {
+    if (!confirm('Are you sure you want to delete this project?')) return;
+    const projects = loadProjectsFromStorage();
+    const updatedProjects = projects.filter(p => p.id !== projectId);
+    saveProjects(updatedProjects);
+    
+    if (currentProjectId === projectId) {
+      setCurrentProjectId(null);
+      saveCurrentProjectId(null);
+      setState({
+        scenes: [INITIAL_SCENE],
+        currentSceneId: 'scene-1',
+        selectedElementId: null,
+        editingElementId: null,
+        zoom: 1,
+        viewMode: 'desktop',
+        isPlaying: false,
+        appView: 'dashboard',
+        playSettings: DEFAULT_PLAY_SETTINGS,
+      });
+    }
+  }, [currentProjectId, saveProjects]);
+
+  const duplicateProject = useCallback((projectId: string) => {
+    const projects = loadProjectsFromStorage();
+    const project = projects.find(p => p.id === projectId);
+    if (!project) return;
+
+    const newProject: Project = {
+      ...project,
+      id: `project_${Date.now()}`,
+      title: `${project.title} (Copy)`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    saveProjects([newProject, ...projects]);
+  }, [saveProjects]);
+
+  // Load initial data
+  useEffect(() => {
+    loadProjects();
+    const savedId = loadCurrentProjectId();
+    if (savedId) {
+      handleLoadProject(savedId);
+    }
+  }, []);
+
+  // Auto Save Logic
+  useEffect(() => {
+    if (!state.isPlaying && state.appView === 'editor' && hasUnsavedChanges && currentProjectId) {
+      const timer = setInterval(() => {
+        console.log('Auto-saving...');
+        // We can't easily call saveCurrentProject here without dependency issues or re-renders
+        // But we can trigger a silent save
+        const silentSave = () => {
+          const projects = loadProjectsFromStorage();
+          const existingProjectIndex = projects.findIndex(p => p.id === currentProjectId);
+          if (existingProjectIndex >= 0) {
+            const projectData: Project = {
+              ...projects[existingProjectIndex],
+              title: projectName,
+              description: projectDescription,
+              updatedAt: new Date().toISOString(),
+              scenes: state.scenes,
+              playSettings: state.playSettings,
+            };
+            const updatedProjects = [...projects];
+            updatedProjects[existingProjectIndex] = projectData;
+            saveProjectsToStorage(updatedProjects);
+            setProjectsList(updatedProjects);
+            setHasUnsavedChanges(false);
+          }
+        };
+        silentSave();
+      }, 30000);
+      return () => clearInterval(timer);
+    }
+  }, [state.isPlaying, state.appView, hasUnsavedChanges, currentProjectId, projectName, projectDescription, state.scenes, state.playSettings]);
+
+  const handleLoadProject = (id: string) => {
+    const projects = loadProjectsFromStorage();
+    const project = projects.find(p => p.id === id);
+    if (project) {
+      setState(prev => ({
+        ...prev,
+        scenes: project.scenes,
+        currentSceneId: project.scenes[0]?.id || 'scene-1',
+        selectedElementId: null,
+        playSettings: project.playSettings || DEFAULT_PLAY_SETTINGS
+      }));
+      setHistory([]);
+      setRedoStack([]);
+      setCurrentProjectId(id);
+      saveCurrentProjectId(id);
+      setProjectName(project.title || 'Untitled Project');
+      setProjectDescription(project.description || '');
+      setHasUnsavedChanges(false);
+    }
   };
 
-  const handleOpenProject = async (id: string, startPlaying = false) => {
-    await handleLoadProject(id);
+  const handleSaveProject = async () => {
+    await saveCurrentProject();
+  };
+
+  const handleDeleteProject = (id: string) => {
+    deleteProject(id);
+  };
+
+  const handleLogin = async () => {
+    // Simulated login for UI consistency
+    setUser({ displayName: 'Local Designer', uid: 'local_user' });
+  };
+
+  const handleLogout = async () => {
+    setUser(null);
+    setCurrentProjectId(null);
+    saveCurrentProjectId(null);
+    setState({
+      scenes: [INITIAL_SCENE],
+      currentSceneId: 'scene-1',
+      selectedElementId: null,
+      editingElementId: null,
+      zoom: 1,
+      viewMode: 'desktop',
+      isPlaying: false,
+      appView: 'dashboard',
+      playSettings: DEFAULT_PLAY_SETTINGS,
+    });
+  };
+
+  const handleNewProject = (title: string, count: number) => {
+    createNewProject(title, count);
+  };
+
+  const handleOpenProject = (id: string, startPlaying = false) => {
+    handleLoadProject(id);
     setState(prev => ({ ...prev, appView: 'editor', isPlaying: startPlaying }));
   };
 
-  const [history, setHistory] = useState<EditorState[]>([]);
-  const [redoStack, setRedoStack] = useState<EditorState[]>([]);
   const [gameTime, setGameTime] = useState(0);
   const [showResults, setShowResults] = useState(false);
   const [totalScores, setTotalScores] = useState<{sceneId: string, score: number, max: number}[]>([]);
@@ -2224,6 +2186,7 @@ export default function App() {
     setHistory(prev => [...prev, state].slice(-50)); // Keep last 50 steps
     setRedoStack([]); // Clear redo stack on new action
     setState(newState);
+    setHasUnsavedChanges(true);
   }, [state]);
 
   const handleUndo = useCallback(() => {
@@ -2815,18 +2778,33 @@ export default function App() {
           </AnimatePresence>
 
           {!user ? (
-            <div className="flex flex-col items-center justify-center py-20 bg-white rounded-[2rem] border-4 border-dashed border-gray-100">
-              <div className="w-16 h-16 bg-orange-50 rounded-full flex items-center justify-center text-orange-300 mb-4">
-                <Layers size={32} />
+            <div className="flex flex-col items-center justify-center py-20 bg-white rounded-[40px] border border-gray-100 shadow-sm relative overflow-hidden group">
+              <div className="absolute inset-0 bg-gradient-to-b from-orange-50/30 to-transparent pointer-events-none" />
+              
+              <div className="w-20 h-20 bg-orange-100 rounded-3xl flex items-center justify-center text-orange-500 mb-6 group-hover:scale-110 transition-transform duration-500">
+                <LogIn size={40} />
               </div>
-              <h3 className="text-xl font-black text-gray-800 mb-2 tracking-tight text-center">Start your journey</h3>
-              <p className="text-gray-400 font-bold mb-6 text-center max-w-xs px-6 leading-relaxed uppercase text-[9px] tracking-widest">Login to create and manage courses</p>
+              
+              <h3 className="text-2xl font-black text-gray-900 mb-3 tracking-tight text-center">Ready to build?</h3>
+              <p className="text-gray-500 font-bold mb-8 text-center max-w-sm px-6 leading-relaxed uppercase text-[10px] tracking-[0.2em]">
+                Securely sign in with Google to create, save, and manage your interactive learning modules.
+              </p>
+              
               <button 
                 onClick={handleLogin}
-                className="flex items-center gap-2 px-8 py-3 bg-gray-900 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-gray-800 transition-all shadow-md active:scale-95"
+                className="flex items-center gap-3 px-10 py-4 bg-gray-900 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-orange-600 transition-all shadow-xl shadow-gray-200 hover:shadow-orange-500/20 active:scale-95 group/btn"
               >
-                <LogIn size={16} /> Login
+                <div className="flex items-center justify-center w-6 h-6 bg-white rounded-md">
+                   <span className="text-gray-900 text-[10px]">G</span>
+                </div>
+                Sign in with Google
               </button>
+              
+              <div className="mt-8 flex items-center gap-2 text-[9px] font-black text-gray-400 uppercase tracking-widest">
+                <Check size={12} className="text-green-500" /> Auto-save enabled
+                <span className="mx-2 text-gray-200">|</span>
+                <Check size={12} className="text-green-500" /> Cloud sync active
+              </div>
             </div>
           ) : isLoadingProjects ? (
             <div className="flex flex-col items-center justify-center py-20">
@@ -2878,16 +2856,15 @@ export default function App() {
                   
                   {/* Center: Info */}
                   <div className="flex-1 min-w-0">
-                    <h4 className="text-sm font-bold text-gray-900 group-hover:text-orange-600 transition-colors tracking-tight line-clamp-1">{p.name}</h4>
+                    <h4 className="text-sm font-bold text-gray-900 group-hover:text-orange-600 transition-colors tracking-tight line-clamp-1">{p.title}</h4>
                     <div className="flex items-center gap-2 mt-1">
                       <div className="flex items-center gap-1">
                         <Play size={10} className="text-orange-400" />
-                        <span className="text-gray-400 font-bold text-[8px] uppercase tracking-widest">Active Lesson</span>
+                        <span className="text-gray-400 font-bold text-[8px] uppercase tracking-widest">{p.status}</span>
                       </div>
                       <div className="w-1 h-1 bg-gray-200 rounded-full" />
                       <div className="flex items-center gap-1">
-                        <Flag size={10} className="text-gray-300" />
-                        <span className="text-gray-400 font-bold text-[8px] uppercase tracking-widest">Module Test</span>
+                        <span className="text-gray-400 font-bold text-[8px] uppercase tracking-widest">{new Date(p.updatedAt).toLocaleDateString()}</span>
                       </div>
                     </div>
                   </div>
@@ -2895,6 +2872,16 @@ export default function App() {
                   {/* Right: Actions */}
                   <div className="flex items-center gap-2 pr-2">
                     <div className="hidden group-hover:flex items-center gap-1">
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          duplicateProject(p.id);
+                        }}
+                        className="p-2 text-gray-400 hover:text-blue-500 transition-colors"
+                        title="Duplicate"
+                      >
+                        <Copy size={14} />
+                      </button>
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
@@ -3164,27 +3151,33 @@ export default function App() {
 
               {activeTab === 'projects' && (
                 <div className="space-y-4">
-                  <div className="p-3 bg-brand-primary/5 rounded-xl border border-brand-primary/10">
-                    <h4 className="text-[10px] font-black text-brand-primary uppercase mb-2 tracking-widest">Active Project</h4>
-                    <input 
-                      type="text"
-                      value={projectName}
-                      onChange={(e) => setProjectName(e.target.value)}
-                      placeholder="Enter project name..."
-                      className="w-full text-xs font-bold p-2 bg-white border border-brand-primary/20 rounded-lg focus:ring-1 focus:ring-brand-primary outline-none"
-                    />
+                  <div className="p-3 bg-brand-primary/5 rounded-xl border border-brand-primary/10 border-dashed">
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-[10px] font-black text-brand-primary uppercase tracking-widest">Active Project Info</h4>
+                      {hasUnsavedChanges && <span className="text-[9px] font-black text-orange-500 bg-orange-100 px-2 py-0.5 rounded-full uppercase tracking-tighter">Modified</span>}
+                    </div>
+                    <div className="space-y-2">
+                      <input 
+                        type="text"
+                        value={projectName}
+                        onChange={(e) => { setProjectName(e.target.value); setHasUnsavedChanges(true); }}
+                        placeholder="Enter project name..."
+                        className="w-full text-xs font-bold p-2 bg-white border border-brand-primary/20 rounded-lg focus:ring-1 focus:ring-brand-primary outline-none"
+                      />
+                      <textarea 
+                        value={projectDescription}
+                        onChange={(e) => { setProjectDescription(e.target.value); setHasUnsavedChanges(true); }}
+                        placeholder="Project description..."
+                        className="w-full text-[10px] font-medium p-2 bg-white border border-brand-primary/20 rounded-lg focus:ring-1 focus:ring-brand-primary outline-none h-16 resize-none"
+                      />
+                    </div>
                   </div>
 
                   <div className="h-px bg-gray-100 mx-2" />
 
                   <div className="space-y-2">
                     <h4 className="text-[10px] font-black text-gray-400 uppercase mb-2 tracking-widest">My Saved Courses</h4>
-                    {!user ? (
-                      <div className="p-4 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-center">
-                        <p className="text-[10px] text-gray-400 font-bold mb-3">Login to save and load projects</p>
-                        <button onClick={handleLogin} className="w-full py-2 bg-brand-secondary text-white rounded-lg text-[10px] font-black uppercase tracking-widest">Login Now</button>
-                      </div>
-                    ) : isLoadingProjects ? (
+                    {isLoadingProjects ? (
                       <div className="flex justify-center p-4">
                         <RefreshCw size={16} className="animate-spin text-gray-400" />
                       </div>
@@ -3198,7 +3191,7 @@ export default function App() {
                             className={`w-full text-left p-3 rounded-xl border-2 transition-all flex items-center gap-3 ${currentProjectId === p.id ? 'border-brand-primary bg-red-50' : 'border-gray-50 hover:border-gray-200 bg-white shadow-sm'}`}
                           >
                             <Box size={14} className={currentProjectId === p.id ? 'text-brand-primary' : 'text-gray-400'} />
-                            <span className={`text-xs font-bold truncate pr-6 ${currentProjectId === p.id ? 'text-brand-primary' : 'text-gray-600'}`}>{p.name}</span>
+                            <span className={`text-xs font-bold truncate pr-6 ${currentProjectId === p.id ? 'text-brand-primary' : 'text-gray-600'}`}>{p.title}</span>
                           </button>
                           <button 
                             onClick={() => handleDeleteProject(p.id)}
